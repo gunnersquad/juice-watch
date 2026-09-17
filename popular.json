@@ -27,7 +27,7 @@
       "Maison Margiela": { "aliases": ["Margiela", "Replica"], "famous": ["By the Fireplace", "Jazz Club", "Lazy Sunday Morning", "Coffee Break"] },
       "Tom Ford": { "aliases": [], "famous": ["Oud Wood", "Tobacco Vanille", "Lost Cherry", "Bitter Peach", "Ombre Leather", "Noir Extreme", "Tuscan Leather", "Soleil Blanc"] },
       "Ralph Lauren": { "aliases": [], "famous": ["Polo Blue", "Polo Red"] },
-      "Hugo Boss": { "aliases": ["Boss Bottled"], "famous": ["Bottled"] },
+      "Hugo Boss": { "aliases": ["Boss"], "famous": ["Bottled"] },
       "Calvin Klein": { "aliases": ["CK One"], "famous": ["Eternity", "Obsession", "CK One"] },
       "Davidoff": { "aliases": [], "famous": ["Cool Water"] },
       "Marc Jacobs": { "aliases": [], "famous": ["Daisy"] }

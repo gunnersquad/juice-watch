@@ -4,10 +4,10 @@
     "famous_only": false,
     "error_drop_percent": 50,
     "error_vs_market_percent": 60,
-    "compare_at_percent": 80,
+    "compare_at_percent": null,
     "absurd_price": 1.0,
     "big_drop_percent": 30,
-    "good_vs_market_percent": 20,
+    "good_vs_market_percent": 30,
     "market_min_other_stores": 2,
     "record_low_days": 90,
     "record_low_min_drop_percent": 15,
@@ -21,7 +21,7 @@
     "delay_seconds": 5,
     "jitter_seconds": 3,
     "timeout_seconds": 20,
-    "max_pages_per_store": 30,
+    "max_pages_per_store": 50,
     "user_agent": "JuiceWatchBot/1.0 (personal price alerts)"
   },
   "stores": [
@@ -31,10 +31,10 @@
     {"name": "Beauty House", "base_url": "https://beautyhouse.com", "platform": "shopify", "scan_catalog": true},
     {"name": "FragranceNet", "base_url": "https://www.fragrancenet.com", "platform": "html", "scan_catalog": false},
     {"name": "FragranceX", "base_url": "https://www.fragrancex.com", "platform": "html", "scan_catalog": false},
-    {"name": "Jomashop", "base_url": "https://www.jomashop.com", "platform": "auto", "scan_catalog": true},
-    {"name": "Perfumania", "base_url": "https://perfumania.com", "platform": "auto", "scan_catalog": true},
-    {"name": "MaxAroma", "base_url": "https://www.maxaroma.com", "platform": "auto", "scan_catalog": true},
-    {"name": "Notino", "base_url": "https://www.notino.com", "platform": "auto", "scan_catalog": true}
+    {"name": "Jomashop", "base_url": "https://www.jomashop.com", "platform": "html", "scan_catalog": false},
+    {"name": "Perfumania", "base_url": "https://perfumania.com", "platform": "shopify", "scan_catalog": true},
+    {"name": "MaxAroma", "base_url": "https://www.maxaroma.com", "platform": "html", "scan_catalog": false},
+    {"name": "Notino", "base_url": "https://www.notino.com", "platform": "html", "scan_catalog": false}
   ],
   "watchlist": []
 }

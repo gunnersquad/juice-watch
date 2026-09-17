@@ -302,7 +302,9 @@ class PopularMatcher:
             for name, info in brands.items():
                 aliases = {normalize(a) for a in [name] + info.get("aliases", [])}
                 famous = [(f, normalize(f)) for f in info.get("famous", [])]
-                self.brands.append({"name": name, "tier": tier, "aliases": aliases, "famous": famous})
+                tokens = set(" ".join(aliases).split())
+                self.brands.append({"name": name, "tier": tier, "aliases": aliases,
+                                    "famous": famous, "tokens": tokens})
 
     def _find(self, text):
         best = None
@@ -322,7 +324,8 @@ class PopularMatcher:
             return None
         text = normalize(title)
         famous = next((f for f, n in brand["famous"] if n in text), None)
-        return {"brand": brand["name"], "tier": brand["tier"], "famous": famous}
+        return {"brand": brand["name"], "tier": brand["tier"], "famous": famous,
+                "brand_tokens": brand["tokens"]}
 
 
 # ---------------------------------------------------------------- product identity
@@ -335,11 +338,21 @@ CONCENTRATIONS = [
     ("edc", re.compile(r" (edc|eau de cologne|cologne) ")),
     ("parfum", re.compile(r" (parfum|pure perfume) ")),
 ]
-QUALIFIERS = ["intense", "absolu", "absolute", "elixir", "extreme", "sport", "fraiche", "night",
-              "nuit", "noir", "gold", "summer", "limited", "edition", "platinum", "ultra",
-              "reserve", "refill", "private", "collector", "exclusif", "exclusive", "infinite"]
-NOT_A_BOTTLE = re.compile(r" (set|sets|gift|kit|coffret|bundle|deodorant|deo|shower|lotion|balm|body|"
-                          r"hair|soap|candle|cream|gel|wash|travel|mist) ")
+NOT_FRAGRANCE = re.compile(r" (deodorant|deo|antiperspirant|candle|candles|lotion|shower|gel|balm|soap|"
+                           r"cream|wash|shampoo|hair|body|bath|diffuser|reed|aftershave|after shave|"
+                           r"powder|stick|lip|mascara|foundation|serum|moisturizer|cleanser) ")
+NOT_A_BOTTLE = re.compile(r" (set|sets|gift|kit|coffret|bundle|travel|mist|mini|duo|trio|pack|discovery) ")
+MEN_WORDS = {"men", "man", "mens", "homme", "uomo", "him", "m"}
+WOMEN_WORDS = {"women", "woman", "womens", "femme", "donna", "her", "lady", "ladies", "w"}
+UNISEX_WORDS = {"unisex", "everyone", "u"}
+FILLER_WORDS = {
+    "for", "by", "eau", "de", "du", "des", "la", "le", "les", "l", "d", "the", "and", "a", "an", "of",
+    "in", "with", "new", "spray", "vaporisateur", "vapo", "natural", "regular", "box", "boxed",
+    "unboxed", "packaging", "same", "liquid", "plainer", "fragrance", "perfume", "perfumes",
+    "authentic", "original", "size", "full", "bottle", "oz", "fl", "ml", "sp", "tester", "tstr",
+    "refillable", "pour", "edp", "edt", "edc", "toilette", "parfum", "parfums", "cologne",
+    "extrait", "pure", "no", "version", "paris",
+}
 COMMON_ML = [5, 7.5, 10, 15, 20, 30, 35, 40, 45, 50, 60, 65, 70, 75, 80, 90, 100, 110,
              120, 125, 150, 180, 200, 250]
 
@@ -358,7 +371,7 @@ def size_ml(title):
 
 
 def product_identity(title, match):
-    """Key for comparing the same fragrance, size, and type across stores (famous scents only)."""
+    """Strict key for comparing the exact same bottle across stores (famous scents only)."""
     if not match or not match["famous"]:
         return None
     text = normalize(title)
@@ -367,10 +380,24 @@ def product_identity(title, match):
     size = size_ml(title)
     if size is None:
         return None
-    conc = next((name for name, pattern in CONCENTRATIONS if pattern.search(text)), "unknown")
-    quals = sorted(q for q in QUALIFIERS if f" {q} " in text)
+    conc = next((name for name, pattern in CONCENTRATIONS if pattern.search(text)), None)
+    if conc is None:
+        return None
+    words = text.split()
+    genders = set()
+    for w in words:
+        if w in MEN_WORDS:
+            genders.add("men")
+        elif w in WOMEN_WORDS:
+            genders.add("women")
+        elif w in UNISEX_WORDS:
+            genders.add("unisex")
+    gender = genders.pop() if len(genders) == 1 else ("unisex" if genders else "unspecified")
+    famous_tokens = set(normalize(match["famous"]).split())
+    ignore = FILLER_WORDS | MEN_WORDS | WOMEN_WORDS | UNISEX_WORDS | match["brand_tokens"]
+    name = {w for w in words if w not in ignore and not re.fullmatch(r"[0-9]+(ml|oz|floz)?", w)} | famous_tokens
     tester = "tester" if TESTER_WORDS.search(title) else "retail"
-    return "|".join([match["brand"], match["famous"], conc, str(size), tester, "+".join(quals)])
+    return "|".join([match["brand"], gender, conc, str(size), tester, "+".join(sorted(name))])
 
 
 # ---------------------------------------------------------------- detection
@@ -392,7 +419,8 @@ def store_check(offer, ref, record_low, rules):
             reasons.append(f"down {drop}% from its recent price of ${ref:.2f}")
         reasons.append(f"lowest price seen in {rules['record_low_days']} days")
     compare = offer["compare_at"]
-    if compare and compare > price and pct_off(price, compare) >= rules["compare_at_percent"]:
+    limit = rules.get("compare_at_percent")
+    if limit and compare and compare > price and pct_off(price, compare) >= limit:
         level, heading = "error", "Possible price error"
         reasons.append(f"{pct_off(price, compare)}% below the store's own list price of ${compare:.2f}")
     if price <= rules["absurd_price"]:
@@ -402,12 +430,14 @@ def store_check(offer, ref, record_low, rules):
 
 
 def market_check(offer, others, rules):
-    """Checks against the same fragrance and size at other stores."""
+    """Checks against the same bottle at other stores. others is {store: price}."""
     if len(others) < rules["market_min_other_stores"]:
         return None, None, [], 0
-    typical = statistics.median(others)
+    typical = statistics.median(others.values())
     below = pct_off(offer["price"], typical) if typical > offer["price"] else 0
-    reason = f"{below}% below the typical price of ${typical:.2f} at {len(others)} other stores"
+    cheapest = min(others, key=others.get)
+    reason = (f"{below}% below the typical price of ${typical:.2f} at {len(others)} other stores "
+              f"(next best: ${others[cheapest]:.2f} at {cheapest})")
     if below >= rules["error_vs_market_percent"]:
         return "error", "Possible price error", [reason], below
     if below >= rules["good_vs_market_percent"]:
@@ -562,6 +592,8 @@ def main():
                         continue
                     if rules.get("ignore_samples", True) and is_sample(offer["title"]):
                         continue
+                    if NOT_FRAGRANCE.search(normalize(offer["title"])):
+                        continue
                     match = matcher.match(offer["vendor"], offer["title"])
                     if match is None and rules.get("popular_only", True):
                         continue
@@ -591,7 +623,7 @@ def main():
             level, heading, reasons = store_check(offer, ref, record_low, rules)
             below = 0
             if identity:
-                others = [p for st, p in market[identity].items() if st != offer["store"]]
+                others = {st: p for st, p in market[identity].items() if st != offer["store"]}
                 m_level, m_heading, m_reasons, below = market_check(offer, others, rules)
                 reasons += m_reasons
                 if m_level == "error" or (m_level and level is None):
@@ -630,6 +662,12 @@ def main():
             if key in checked and checked[key] > alerted[key] + 0.009:
                 del alerted[key]
         to_send.sort(key=lambda a: (a["level"] != "error", not a["famous"], -a["drop"]))
+        if candidates and not state.get("deal_baseline_v2"):
+            quiet = [a for a in to_send if a["level"] != "error"]
+            to_send = [a for a in to_send if a["level"] == "error"]
+            state["deal_baseline_v2"] = True
+            log(f"One-time catch-up: saved {len(quiet)} existing deals without alerting; "
+                "only new deals will be sent from now on")
 
         cap = rules.get("max_alerts_per_run", 10)
         for alert in to_send[:cap]:
