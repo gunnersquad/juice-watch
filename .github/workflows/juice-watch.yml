@@ -32,7 +32,7 @@ jobs:
       - run: pip install requests
 
       - name: Restore price history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: state
           key: juice-state-${{ github.run_id }}
@@ -47,7 +47,7 @@ jobs:
 
       - name: Save price history
         if: always() && inputs.mode != 'test' && inputs.mode != 'dry-run'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: state
           key: juice-state-${{ github.run_id }}
