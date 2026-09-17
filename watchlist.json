@@ -1,0 +1,40 @@
+{
+  "rules": {
+    "popular_only": true,
+    "famous_only": false,
+    "error_drop_percent": 50,
+    "error_vs_market_percent": 60,
+    "compare_at_percent": 80,
+    "absurd_price": 1.0,
+    "big_drop_percent": 30,
+    "good_vs_market_percent": 20,
+    "market_min_other_stores": 2,
+    "record_low_days": 90,
+    "record_low_min_drop_percent": 15,
+    "record_low_min_history_days": 14,
+    "reference_days": 14,
+    "ignore_samples": true,
+    "watchlist_percent": 60,
+    "max_alerts_per_run": 10
+  },
+  "polite": {
+    "delay_seconds": 5,
+    "jitter_seconds": 3,
+    "timeout_seconds": 20,
+    "max_pages_per_store": 30,
+    "user_agent": "JuiceWatchBot/1.0 (personal price alerts)"
+  },
+  "stores": [
+    {"name": "Arvella", "base_url": "https://arvellafragrance.com", "platform": "shopify", "scan_catalog": true},
+    {"name": "AuraFragrance", "base_url": "https://www.aurafragrance.com", "platform": "shopify", "scan_catalog": true},
+    {"name": "FragFlex", "base_url": "https://fragflex.com", "platform": "shopify", "scan_catalog": true},
+    {"name": "Beauty House", "base_url": "https://beautyhouse.com", "platform": "shopify", "scan_catalog": true},
+    {"name": "FragranceNet", "base_url": "https://www.fragrancenet.com", "platform": "html", "scan_catalog": false},
+    {"name": "FragranceX", "base_url": "https://www.fragrancex.com", "platform": "html", "scan_catalog": false},
+    {"name": "Jomashop", "base_url": "https://www.jomashop.com", "platform": "auto", "scan_catalog": true},
+    {"name": "Perfumania", "base_url": "https://perfumania.com", "platform": "auto", "scan_catalog": true},
+    {"name": "MaxAroma", "base_url": "https://www.maxaroma.com", "platform": "auto", "scan_catalog": true},
+    {"name": "Notino", "base_url": "https://www.notino.com", "platform": "auto", "scan_catalog": true}
+  ],
+  "watchlist": []
+}
