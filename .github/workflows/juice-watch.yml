@@ -1,0 +1,53 @@
+name: Juice Watch
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "normal, test (send a test alert), or dry-run (log alerts only)"
+        default: "normal"
+        type: choice
+        options: [normal, test, dry-run]
+
+concurrency:
+  group: juice-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Restore price history
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: juice-state-${{ github.run_id }}
+          restore-keys: juice-state-
+
+      - name: Check prices
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          JUICE_MODE: ${{ inputs.mode }}
+        run: python juice_watch.py
+
+      - name: Save price history
+        if: always() && inputs.mode != 'test' && inputs.mode != 'dry-run'
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: juice-state-${{ github.run_id }}
