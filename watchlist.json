@@ -6,16 +6,17 @@
     "error_vs_market_percent": 60,
     "compare_at_percent": null,
     "absurd_price": 1.0,
-    "big_drop_percent": 30,
-    "good_vs_market_percent": 30,
+    "big_drop_percent": 20,
+    "good_vs_market_percent": 20,
     "market_min_other_stores": 2,
     "record_low_days": 90,
-    "record_low_min_drop_percent": 15,
+    "record_low_min_drop_percent": 10,
     "record_low_min_history_days": 14,
     "reference_days": 14,
     "ignore_samples": true,
     "watchlist_percent": 60,
-    "max_alerts_per_run": 10
+    "max_alerts_per_run": 10,
+    "parallel_stores": 6
   },
   "polite": {
     "delay_seconds": 5,
@@ -34,7 +35,13 @@
     {"name": "Jomashop", "base_url": "https://www.jomashop.com", "platform": "html", "scan_catalog": false},
     {"name": "Perfumania", "base_url": "https://perfumania.com", "platform": "shopify", "scan_catalog": true},
     {"name": "MaxAroma", "base_url": "https://www.maxaroma.com", "platform": "html", "scan_catalog": false},
-    {"name": "Notino", "base_url": "https://www.notino.com", "platform": "html", "scan_catalog": false}
+    {"name": "Notino", "base_url": "https://www.notino.com", "platform": "html", "scan_catalog": false},
+    {"name": "Olfactory Factory", "base_url": "https://www.olfactoryfactoryllc.com", "platform": "auto", "scan_catalog": true},
+    {"name": "Venba Fragrance", "base_url": "https://www.venbafragrance.com", "platform": "auto", "scan_catalog": true},
+    {"name": "Fragrance Lord", "base_url": "https://www.fragrancelord.com", "platform": "auto", "scan_catalog": true},
+    {"name": "Fragrance Nevaeh", "base_url": "https://fragrance-nevaeh.com", "platform": "auto", "scan_catalog": true},
+    {"name": "Emnt Scents", "base_url": "https://emntscents.com", "platform": "auto", "scan_catalog": true},
+    {"name": "Mystic Perfume", "base_url": "https://mysticperfume.com", "platform": "auto", "scan_catalog": true}
   ],
   "watchlist": []
 }

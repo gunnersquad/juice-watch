@@ -15,6 +15,7 @@ import statistics
 import sys
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from urllib import robotparser
 from urllib.parse import urlparse
 
@@ -83,6 +84,7 @@ class PoliteClient:
         self.robots = {}
         self.last_request = {}
         self.blocked = set()
+        self.last_status = None
 
     def _wait_turn(self, host):
         ready_at = self.last_request.get(host, 0) + self.delay + random.uniform(0, self.jitter)
@@ -118,11 +120,13 @@ class PoliteClient:
             return None
         for attempt in range(2):
             self._wait_turn(host)
+            self.last_status = None
             try:
                 r = self.session.get(url, timeout=self.timeout)
             except requests.RequestException as err:
                 log(f"  network error on {url}: {err}")
                 return None
+            self.last_status = r.status_code
             if r.status_code in (429, 503):
                 retry = to_float(r.headers.get("Retry-After")) or 60
                 if attempt == 0 and retry <= 120:
@@ -135,6 +139,8 @@ class PoliteClient:
             if r.status_code in (401, 403):
                 log(f"  {host} refused access (HTTP {r.status_code}); skipping it this run")
                 self.blocked.add(host)
+                return None
+            if r.status_code == 404 and url.endswith("products.json?limit=1"):
                 return None
             if r.status_code >= 400:
                 log(f"  HTTP {r.status_code} for {url}")
@@ -274,11 +280,15 @@ def resolve_platform(client, store, state, now):
         return cached[0]
     r = client.get(store["base_url"].rstrip("/") + "/products.json?limit=1")
     if r is None:
-        return "html"
-    try:
-        found = "shopify" if isinstance(r.json().get("products"), list) else "html"
-    except (ValueError, AttributeError):
+        if client.last_status != 404:
+            log(f"  {store['name']}: couldn't reach the store to check its type; will retry next run")
+            return "html"
         found = "html"
+    else:
+        try:
+            found = "shopify" if isinstance(r.json().get("products"), list) else "html"
+        except (ValueError, AttributeError):
+            found = "html"
     state["platforms"][store["name"]] = [found, now]
     log(f"  {store['name']} detected as {'Shopify (whole-store scans on)' if found == 'shopify' else 'non-Shopify (watchlist only)'}")
     return found
@@ -445,6 +455,63 @@ def market_check(offer, others, rules):
     return None, None, [], below
 
 
+def scan_store(store, history, polite, rules, matcher, now, window):
+    """Reads one store's full catalog and updates its price history. Runs in its own thread."""
+    client = PoliteClient(polite)
+    day = 24 * 3600
+    low_window = rules.get("record_low_days", 90) * day
+    min_history = rules.get("record_low_min_history_days", 14) * day
+    first_run = not history
+    candidates, market = [], {}
+    count = recognized = 0
+    log(f"Scanning {store['name']}")
+    for product in shopify_catalog(client, store, polite.get("max_pages_per_store", 30)):
+        for offer in offers_from_product(store, product):
+            count += 1
+            price = offer["price"]
+            old = history.get(offer["id"])
+            record_low = False
+            if old:
+                ref, ref_time = (old[2], old[3]) if len(old) >= 4 else (old[0], old[1])
+                low, low_time, first_seen = (old[4], old[5], old[6]) if len(old) >= 7 else (old[0], old[1], old[1])
+                if price >= ref or now - ref_time > window:
+                    ref, ref_time = price, now
+                if now - low_time > low_window:
+                    low, low_time = price, now
+                record_low = (
+                    price < low - 0.009
+                    and now - first_seen >= min_history
+                    and pct_off(price, ref) >= rules.get("record_low_min_drop_percent", 15)
+                )
+                if price <= low:
+                    low, low_time = price, now
+            else:
+                ref = low = price
+                ref_time = low_time = first_seen = now
+            history[offer["id"]] = [price, now, ref, ref_time, low, low_time, first_seen]
+
+            if not offer["available"] or price <= 0:
+                continue
+            if rules.get("ignore_samples", True) and is_sample(offer["title"]):
+                continue
+            if NOT_FRAGRANCE.search(normalize(offer["title"])):
+                continue
+            match = matcher.match(offer["vendor"], offer["title"])
+            if match is None and rules.get("popular_only", True):
+                continue
+            if match and rules.get("famous_only", False) and not match["famous"]:
+                continue
+            recognized += 1
+            identity = product_identity(offer["title"], match)
+            if identity:
+                market[identity] = min(price, market.get(identity, price))
+            if not first_run:
+                candidates.append((offer, match, identity, ref, record_low))
+    for vid in [v for v, entry in history.items() if now - entry[1] > PRUNE_AFTER_SECONDS]:
+        del history[vid]
+    return candidates, market, count, recognized, first_run
+
+
 # ---------------------------------------------------------------- alerts
 
 def notify(title, body, url=None, dry_run=False, priority="high"):
@@ -550,68 +617,39 @@ def main():
                         "url": offer["url"],
                     }
 
-        # Pass 1: read every product on stores with a full product feed.
-        day = 24 * 3600
-        low_window = rules.get("record_low_days", 90) * day
-        min_history = rules.get("record_low_min_history_days", 14) * day
+        # Pass 1: read every product on stores with a full product feed, several stores at once.
+        scan_list = [st for st in stores.values()
+                     if st.get("scan_catalog") and st.get("platform") == "shopify"]
+        for st in scan_list:
+            state["prices"].setdefault(st["name"], {})
+        had_history = {st["name"] for st in scan_list if state["prices"][st["name"]]}
+        workers = max(1, min(len(scan_list), rules.get("parallel_stores", 6)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(
+                lambda st: scan_store(st, state["prices"][st["name"]], polite, rules, matcher, now, window),
+                scan_list))
         candidates = []
         market = {}
-        for store in stores.values():
-            if not store.get("scan_catalog") or store.get("platform") != "shopify":
-                continue
-            log(f"Scanning {store['name']}")
-            history = state["prices"].setdefault(store["name"], {})
-            first_run = not history
-            count = recognized = 0
-            for product in shopify_catalog(client, store, polite.get("max_pages_per_store", 30)):
-                for offer in offers_from_product(store, product):
-                    count += 1
-                    price = offer["price"]
-                    old = history.get(offer["id"])
-                    record_low = False
-                    if old:
-                        ref, ref_time = (old[2], old[3]) if len(old) >= 4 else (old[0], old[1])
-                        low, low_time, first_seen = (old[4], old[5], old[6]) if len(old) >= 7 else (old[0], old[1], old[1])
-                        if price >= ref or now - ref_time > window:
-                            ref, ref_time = price, now
-                        if now - low_time > low_window:
-                            low, low_time = price, now
-                        record_low = (
-                            price < low - 0.009
-                            and now - first_seen >= min_history
-                            and pct_off(price, ref) >= rules.get("record_low_min_drop_percent", 15)
-                        )
-                        if price <= low:
-                            low, low_time = price, now
-                    else:
-                        ref = low = price
-                        ref_time = low_time = first_seen = now
-                    history[offer["id"]] = [price, now, ref, ref_time, low, low_time, first_seen]
-
-                    if not offer["available"] or price <= 0:
-                        continue
-                    if rules.get("ignore_samples", True) and is_sample(offer["title"]):
-                        continue
-                    if NOT_FRAGRANCE.search(normalize(offer["title"])):
-                        continue
-                    match = matcher.match(offer["vendor"], offer["title"])
-                    if match is None and rules.get("popular_only", True):
-                        continue
-                    if match and rules.get("famous_only", False) and not match["famous"]:
-                        continue
-                    recognized += 1
-                    identity = product_identity(offer["title"], match)
-                    if identity:
-                        by_store = market.setdefault(identity, {})
-                        by_store[store["name"]] = min(price, by_store.get(store["name"], price))
-                    if not first_run:
-                        candidates.append((offer, match, identity, ref, record_low))
+        for st, (store_candidates, store_market, count, recognized, first_run) in zip(scan_list, results):
             if first_run and count:
-                log(f"  {count} listings saved (first run: learning prices, alerts start next run)")
+                log(f"{st['name']}: {count} listings saved (first run: learning prices, alerts start next run)")
             else:
-                log(f"  {count} listings checked, {recognized} from popular brands")
-            for vid in [v for v, entry in history.items() if now - entry[1] > PRUNE_AFTER_SECONDS]:
-                del history[vid]
+                log(f"{st['name']}: {count} listings checked, {recognized} from popular brands")
+            candidates.extend(store_candidates)
+            for identity, price in store_market.items():
+                market.setdefault(identity, {})[st["name"]] = price
+
+        # Stores joining cross-store comparisons for the first time don't trigger a flood of old deals.
+        contributing = {name for group in market.values() for name in group}
+        if "market_members" in state:
+            members = set(state["market_members"])
+        else:
+            members = had_history
+        new_members = contributing - members
+        if new_members:
+            log(f"New to cross-store comparisons: {', '.join(sorted(new_members))} "
+                "(existing price gaps with these stores are saved quietly this run)")
+        state["market_members"] = sorted(members | contributing)
 
         matched = sum(1 for v in market.values() if len(v) > 1)
         log(f"Cross-store comparison: {matched} famous fragrances found at 2+ stores")
@@ -621,11 +659,15 @@ def main():
             key = "cat:" + offer["key"]
             checked[key] = offer["price"]
             level, heading, reasons = store_check(offer, ref, record_low, rules)
+            store_level = level
+            quiet = False
             below = 0
             if identity:
                 others = {st: p for st, p in market[identity].items() if st != offer["store"]}
                 m_level, m_heading, m_reasons, below = market_check(offer, others, rules)
                 reasons += m_reasons
+                if m_level == "deal" and store_level is None and new_members & set(market[identity]):
+                    quiet = True
                 if m_level == "error" or (m_level and level is None):
                     level, heading = m_level, m_heading
                 elif m_level == "deal" and level == "deal":
@@ -641,7 +683,7 @@ def main():
                 tags.append("tester")
             drop = pct_off(offer["price"], ref) if ref and ref > offer["price"] else 0
             flagged[key] = {
-                "price": offer["price"], "level": level,
+                "price": offer["price"], "level": level, "quiet": quiet,
                 "famous": bool(match and match["famous"]),
                 "drop": max(drop, below),
                 "title": f"{heading} at {offer['store']}",
@@ -655,7 +697,7 @@ def main():
         to_send = []
         for key, alert in flagged.items():
             previous = alerted.get(key)
-            if previous is None or alert["price"] < previous - 0.009:
+            if (previous is None or alert["price"] < previous - 0.009) and not alert.get("quiet"):
                 to_send.append(alert)
             alerted[key] = min(alert["price"], previous) if previous else alert["price"]
         for key in list(alerted):
